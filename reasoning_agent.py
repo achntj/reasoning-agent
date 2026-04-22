@@ -34,6 +34,7 @@ def call_llm(prompt, system="You are a helpful assistant.", temperature=0.0):
         print(f"API request failed: {e}")
         return None
 
+#will edit to fit the 8 technique requirement later
 def answer_question(question_text):
     prompt = f"""Answer the following question.
     Return only the final answer as a plain string.

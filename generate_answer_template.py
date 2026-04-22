@@ -31,7 +31,7 @@ def load_questions(path: Path) -> List[Dict[str, Any]]:
 
 def build_answers(questions: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     answers = []
-    for idx, question in enumerate(questions[:1], start=1):
+    for idx, question in enumerate(questions[:1], start=1): #Only process the first question for testing purposes. Remove the slicing to process all questions.
         # Example: assume you have an agent loop that produces an answer string.
         # real_answer = agent_loop(question["input"])
         # answers.append({"output": real_answer})
