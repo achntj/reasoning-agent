@@ -37,7 +37,7 @@ def build_answers(questions: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     # this needs to be changed later, I am slicing since it takes too long
 
     for idx, question in enumerate(
-        questions[:1], start=1
+        questions[:100], start=1
     ):  # Only process the first question for testing purposes. Remove the slicing to process all questions.
         # Example: assume you have an agent loop that produces an answer string.
         # real_answer = agent_loop(question["input"])
@@ -70,6 +70,24 @@ def validate_results(
             )
 
 
+# def main() -> None:
+#     questions = load_questions(INPUT_PATH)
+#     answers = build_answers(questions)
+
+#     with OUTPUT_PATH.open("w", encoding="utf-8") as fp:
+#         json.dump(answers, fp, ensure_ascii=False, indent=2)
+
+#     with OUTPUT_PATH.open("r", encoding="utf-8") as fp:
+#         saved_answers = json.load(fp)
+#     validate_results(questions, saved_answers)
+#     print(
+#         f"Wrote {len(answers)} answers to {OUTPUT_PATH} "
+#         "and validated format successfully."
+#     )
+
+
+# temporary main function that skips validation of file lengths to test api calls and answer generation.
+# Remember to switch back to the original main function when running test on whole file
 def main() -> None:
     questions = load_questions(INPUT_PATH)
     answers = build_answers(questions)
@@ -77,25 +95,7 @@ def main() -> None:
     with OUTPUT_PATH.open("w", encoding="utf-8") as fp:
         json.dump(answers, fp, ensure_ascii=False, indent=2)
 
-    with OUTPUT_PATH.open("r", encoding="utf-8") as fp:
-        saved_answers = json.load(fp)
-    validate_results(questions, saved_answers)
-    print(
-        f"Wrote {len(answers)} answers to {OUTPUT_PATH} "
-        "and validated format successfully."
-    )
-
-
-# temporary main function that skips validation of file lengths to test api calls and answer generation.
-# Remember to switch back to the original main function when running test on whole file
-# def main() -> None:
-#     questions = load_questions(INPUT_PATH)
-#     answers = build_answers(questions)
-#
-#     with OUTPUT_PATH.open("w", encoding="utf-8") as fp:
-#         json.dump(answers, fp, ensure_ascii=False, indent=2)
-#
-#     print(f"Wrote {len(answers)} answers to {OUTPUT_PATH}")
+    print(f"Wrote {len(answers)} answers to {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

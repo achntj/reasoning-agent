@@ -2,6 +2,8 @@ import os
 import re
 import requests
 from dotenv import load_dotenv
+from collections import Counter
+import json
 
 load_dotenv()
 
@@ -66,6 +68,44 @@ def clean_answer(text):
 
     return text[:4999].strip()
 
+def majority_vote(answers):
+    filtered = [a for a in answers if a]
+    if not filtered:
+        return ""
+    counts = Counter(filtered)
+    return counts.most_common(1)[0][0]
+
+
+def extract_mcq_letter(text):
+    if not text:
+        return ""
+    match = re.search(r"\b([A-D])\b", text)
+    return match.group(1) if match else ""
+
+
+def normalize_yes_no(text):
+    if not text:
+        return ""
+    lower = text.lower()
+    if "yes" in lower:
+        return "Yes"
+    if "no" in lower:
+        return "No"
+    return text.strip()
+
+
+def classify_question_type(question_text):
+    q = question_text.lower()
+
+    if " a." in q and " b." in q:
+        return "mcq"
+    if "options:" in q:
+        return "mcq"
+    if "yes or no" in q or "plausible?" in q or "plausible" in q:
+        return "yesno"
+    if any(x in q for x in ["calculate", "how many", "how much", "total", "%", "commission"]):
+        return "math"
+    return "general"
 
 def build_direct_prompt(question_text):
     return f"""Answer the following question.
@@ -110,6 +150,41 @@ Return only the final corrected answer.
 Do not include explanation.
 """
 
+# 5 self consistency
+def build_self_consistency_prompt(question_text):
+    return f"""Solve the following question carefully.
+
+Return only the final answer.
+Do not include explanation.
+
+Question: {question_text}
+"""
+
+# 6 tree of thought
+def build_tot_prompt(question_text):
+    return f"""Consider a few possible reasoning paths internally for this question, choose the best one, and return only the final answer.
+
+Question: {question_text}
+"""
+
+# 7 ReACT
+def build_react_prompt(question_text):
+    return f"""Use an internal Thought/Action/Observation style process if helpful.
+
+You may reason internally, but do not show your reasoning.
+Return only the final answer.
+
+Question: {question_text}
+"""
+
+# 8 tool augmented reasoning
+def build_tool_augmented_prompt(question_text):
+    return f"""Answer the following question carefully.
+
+Return only the final answer.
+
+Question: {question_text}
+"""
 
 def answer_question(question_text):
     question_text = question_text.strip()
@@ -133,14 +208,67 @@ def answer_question(question_text):
     draft_answer = decomposition_answer or cot_answer or direct_answer
 
     # 4. Self-refine
-    final_answer = clean_answer(
+    refined_answer = clean_answer(
         call_llm(build_self_refine_prompt(question_text, draft_answer), temperature=0.0)
     )
 
-    if final_answer:
-        return final_answer
-    if draft_answer:
-        return draft_answer
-    if cot_answer:
-        return cot_answer
-    return direct_answer
+    #5 self consistency
+    sc_candidates = []
+    for _ in range(3):
+        sc_candidates.append(
+            clean_answer(
+                call_llm(
+                    build_self_consistency_prompt(question_text),
+                    temperature=0.4,
+                    max_tokens=256,
+                )
+            )
+        )
+    sc_answer = majority_vote(sc_candidates)
+
+    #6 tree of thought
+    tot_answer = clean_answer(
+        call_llm(build_tot_prompt(question_text), temperature=0.2, max_tokens=256)
+    )
+
+    #7 ReACT
+    react_ans = clean_answer(
+        call_llm(build_react_prompt(question_text), temperature=0.1, max_tokens=256)
+    )
+
+    #8 tool-augmented reasoning
+    tool_raw = clean_answer(
+        call_llm(build_tool_augmented_prompt(question_text), temperature=0.0, max_tokens=256)
+    )
+
+    qtype = classify_question_type(question_text)
+    if qtype == "mcq":
+        letter = extract_mcq_letter(tool_raw)
+        tool_answer = letter if letter else tool_raw
+    elif qtype == "yesno":
+        tool_answer = normalize_yes_no(tool_raw)
+    else:
+        tool_answer = tool_raw
+
+    candidates = [
+        direct_answer,
+        cot_answer,
+        decomposition_answer,
+        refined_answer,
+        sc_answer,
+        tot_answer,
+        react_ans,
+        tool_answer,
+    ]
+
+    final_answer = majority_vote([ans for ans in candidates if ans])
+
+    return final_answer or ""
+
+    # if final_answer:
+    #     return final_answer
+    # if draft_answer:
+    #     return draft_answer
+    # if cot_answer:
+    #     return cot_answer
+    # return direct_answer
