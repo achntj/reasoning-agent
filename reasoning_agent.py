@@ -266,6 +266,8 @@ Question: {q}"""
 def prompt_plan(q):
     return f"""Read the problem carefully. Produce only the next plan that achieves the stated goal.
 Use the exact action format shown in the examples. Output only the plan and nothing else.
+Begin your output with [PLAN] on its own line, list each action on its own line, and end with [PLAN END] on its own line.
+
 
 Question: {q}"""
 
