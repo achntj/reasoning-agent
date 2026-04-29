@@ -6,13 +6,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_KEY = os.getenv("API_KEY")
+API_KEY  = os.getenv("API_KEY")
 API_BASE = "https://openai.rc.asu.edu/v1"
-MODEL = "qwen3-30b-a3b-instruct-2507"
+MODEL    = "qwen3-30b-a3b-instruct-2507"
 
 
-def call_llm(prompt, system="You are a helpful assistant. Reply with only the final answer, no explanation.", temperature=0.0, max_tokens=256):
-    url = f"{API_BASE}/chat/completions"
+def call_llm(prompt, system="You are a helpful assistant. Reply with only the final answer, no explanation.", temperature=0.0, max_tokens=256, retries=2):
+    url     = f"{API_BASE}/chat/completions"
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MODEL,
@@ -20,15 +20,22 @@ def call_llm(prompt, system="You are a helpful assistant. Reply with only the fi
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    try:
-        r = requests.post(url, headers=headers, json=payload, timeout=60)
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"].strip()
-        print("API error:", r.status_code, r.text)
-        return ""
-    except Exception as e:
-        print("Request failed:", e)
-        return ""
+    for attempt in range(retries + 1):
+        try:
+            r = requests.post(url, headers=headers, json=payload, timeout=90)
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"].strip()
+            print("API error:", r.status_code, r.text)
+            return ""
+        except requests.exceptions.Timeout:
+            if attempt < retries:
+                print(f"Timeout, retrying ({attempt + 1}/{retries})...")
+            else:
+                print("Request timed out after all retries.")
+                return ""
+        except Exception as e:
+            print("Request failed:", e)
+            return ""
 
 
 # --- answer cleaning ---
@@ -37,9 +44,14 @@ def clean_answer(text):
     if not text:
         return ""
     text = text.strip()
+    # strip markdown code fences (handles ``` and ```python etc.)
+    text = re.sub(r"```[a-zA-Z]*\n?", "", text)
+    text = re.sub(r"\n?```", "", text)
+    text = text.strip()
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     for pattern in [r"(?i)verified answer\s*[:\-]\s*(.*)", r"(?i)corrected answer\s*[:\-]\s*(.*)",
-                    r"(?i)final answer\s*[:\-]\s*(.*)", r"(?i)answer\s*[:\-]\s*(.*)"]:
+                    r"(?i)final answer\s*[:\-]\s*(.*)", r"(?i)solution\s*[:\-]\s*(.*)",
+                    r"(?i)answer\s*[:\-]\s*(.*)"]:
         m = re.search(pattern, text, re.DOTALL)
         if m:
             text = m.group(1).strip()
@@ -76,7 +88,7 @@ def normalize_yes_no(text):
         return "No"
     return text.strip()
 
-# technique 7: self-consistency 
+
 def normalize_for_vote(answer, qtype):
     answer = clean_answer(answer)
     if not answer:
@@ -100,18 +112,38 @@ def majority_vote(answers, qtype="general"):
     return Counter(cleaned).most_common(1)[0][0]
 
 
-# --- question type classification ---
+# question classification
 
 def classify(q):
-    text = q.lower()
+    text  = q.lower()
     start = q[:400].lower()
 
-    if "options:" in start or re.search(r"\([a-e]\)", start) or re.search(r"(?:^|\s)[a-d]\.\s", start):
-        return "mcq"
+    # coding questions
+    code_signals = ["the function should output", "you should write self-contained code",
+                    "def task_func", "complete the following code", "```python"]
+    if any(s in text for s in code_signals):
+        return "code"
 
-    yesno_starts = ("does ", "do ", "did ", "is ", "are ", "can ")
+    # planning questions
+    plan_signals = ["[plan]", "[plan end]", "[statement]", "my plan is as follows",
+                    "here are the actions i can do"]
+    if any(s in text for s in plan_signals):
+        return "plan"
+
+    # MCQ
+    has_yesno_options = "options:\n- yes\n- no" in text or "options:\n(a) yes\n(b) no" in text
+    if not has_yesno_options:
+        if "options:" in start or re.search(r"\([a-e]\)", start) or re.search(r"(?:^|\s)[a-d]\.\s", start):
+            return "mcq"
+
+    # long-context questions
+    has_long_context = "context:" in text or len(text) > 600
+    if has_long_context:
+        return "general"
+
+    yesno_starts = ("does ", "do ", "did ", "is ", "are ", "can ", "would ", "could ", "should ", "was ", "were ", "will ")
     yesno_phrases = ("yes or no", "plausible?", "is the following sentence plausible")
-    if any(p in text for p in yesno_phrases) or any(text.startswith(s) for s in yesno_starts):
+    if has_yesno_options or any(p in text for p in yesno_phrases) or any(text.startswith(s) for s in yesno_starts):
         return "yesno"
 
     math_words = [
@@ -119,16 +151,13 @@ def classify(q):
         "commission", "cost", "earned", "saved", "profit", "price", "per",
         "twice", "double", "triple", "sum", "difference", "product", "times",
     ]
-    has_long_context = "context:" in text or len(text) > 600
-    if not has_long_context and (any(w in text for w in math_words) or re.search(r'\$\d+', text)):
+    if any(w in text for w in math_words) or re.search(r'\$\d+', text):
         return "math"
-
-
 
     return "general"
 
 
-# technique 8: translation 
+# # technique 8: translation
 
 def is_non_english(text):
     return sum(1 for c in text if ord(c) > 127) / max(len(text), 1) > 0.3
@@ -142,7 +171,6 @@ def translate(text):
     return result.strip() if result.strip() else text
 
 
-# --- prompt builders ---
 
 # technique 1: zero-shot direct
 def prompt_direct(q, qtype):
@@ -154,11 +182,13 @@ def prompt_direct(q, qtype):
             "\n- If asking for remaining or missing, subtract from the target."
             "\n- Make sure you answered what was asked, not an intermediate value."
         )
-
+    if qtype == "general":
+        extra = "\n- Keep your answer short: a single name, phrase, or number when possible."
     return f"""Answer the question. Read carefully and answer exactly what is being asked.
 
 Rules:
 - Return only the final answer, no explanation.
+- For multiple choice, return the option letter and option.
 - For yes/no, return only Yes or No.
 - Do not copy sentences from the question as your answer.{extra}
 
@@ -177,6 +207,7 @@ On the very last line write: Final Answer: <number>
 Question: {q}"""
     return f"""Solve carefully step by step, then return only the final answer.
 For multiple choice, return only the letter. For yes/no, return only Yes or No.
+Keep the final answer short.
 
 Question type: {qtype}
 Question: {q}"""
@@ -225,10 +256,24 @@ Question: {q}
 On the last line write: Verified Answer: <number>"""
 
 
+def prompt_code(q):
+    return f"""Write the requested code. Return only the code, no explanation or anyting else.
+
+Question: {q}"""
 
 
 
-# --- main agent loop ---
+def prompt_plan(q):
+    return f"""Read the problem carefully. Produce only the next plan that achieves the stated goal.
+Use the exact action format shown in the examples. Output only the plan and nothing else.
+
+Question: {q}"""
+
+
+# technique 7: self-consistency (called with temperature > 0, majority voted externally)
+
+
+
 
 def answer_question(q):
     q = q.strip()
@@ -238,8 +283,24 @@ def answer_question(q):
         q = translate(q)
 
     qtype = classify(q)
+
+    # coding questions
+    if qtype == "code":
+        code_system = "You are a coding assistant. Return only the code requested, no explanation, comments or anything else."
+        result = call_llm(prompt_code(q), system=code_system, max_tokens=1024)
+        # strip fences but otherwise return the code as-is
+        result = re.sub(r"```[a-zA-Z]*\n?", "", result)
+        result = re.sub(r"\n?```", "", result).strip()
+        return result[:4999]
+
+    # planning questions: ask for a multi-line plan, return as-is without line extraction
+    if qtype == "plan":
+        plan_system = "You are a planning assistant. Output only the requested plan in the exact format shown. No explanation."
+        result = call_llm(prompt_plan(q), system=plan_system, max_tokens=2048)
+        return result.strip()[:4999]
+
     answers = []
-    tokens = 512 if qtype in {"math", "general"} else 256
+    tokens  = 512 if qtype in {"math", "general"} else 256
 
     # technique 1: zero-shot direct
     a_direct = clean_answer(call_llm(prompt_direct(q, qtype)))
@@ -254,10 +315,10 @@ def answer_question(q):
         a_decomp = clean_answer(call_llm(prompt_decompose(q, qtype), max_tokens=512))
         answers.append(a_decomp)
 
-    draft = majority_vote(answers, qtype) or a_direct
+    draft    = majority_vote(answers, qtype) or a_direct
     disagree = normalize_for_vote(a_direct, qtype) != normalize_for_vote(a_cot, qtype)
 
-    # technique 4: self-refine — only when direct and CoT disagree
+    # technique 4: self-refine
     if disagree:
         a_refine = clean_answer(call_llm(prompt_refine(q, draft, qtype), max_tokens=tokens))
         answers.append(a_refine)
@@ -269,7 +330,7 @@ def answer_question(q):
         # technique 6: verification pass
         answers.append(clean_answer(call_llm(prompt_verify(q, draft), max_tokens=512)))
 
-    # technique 7: self-consistency — stochastic samples for tie-breaking
+    # technique 7: self-consistency
     if disagree and qtype in {"math", "mcq"}:
         answers.append(clean_answer(call_llm(prompt_cot(q, qtype), temperature=0.4, max_tokens=tokens)))
 

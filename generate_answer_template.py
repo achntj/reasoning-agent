@@ -39,9 +39,6 @@ def build_answers(questions: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     for idx, question in enumerate(
         questions, start=1
     ):  # Only process the first question for testing purposes. Remove the slicing to process all questions.
-        # Example: assume you have an agent loop that produces an answer string.
-        # real_answer = agent_loop(question["input"])
-        # answers.append({"output": real_answer})
         print(f"Starting question {idx}")
         answer = answer_question(question["input"])
         print(f"Finished question {idx}")
@@ -71,19 +68,19 @@ def validate_results(
 
 
 def main() -> None:
-     questions = load_questions(INPUT_PATH)
-     answers = build_answers(questions)
+    questions = load_questions(INPUT_PATH)
+    answers = build_answers(questions)
 
-     with OUTPUT_PATH.open("w", encoding="utf-8") as fp:
-         json.dump(answers, fp, ensure_ascii=False, indent=2)
+    with OUTPUT_PATH.open("w", encoding="utf-8") as fp:
+        json.dump(answers, fp, ensure_ascii=False, indent=2)
 
-     with OUTPUT_PATH.open("r", encoding="utf-8") as fp:
-         saved_answers = json.load(fp)
-     validate_results(questions, saved_answers)
-     print(
-         f"Wrote {len(answers)} answers to {OUTPUT_PATH} "
-         "and validated format successfully."
-     )
+    with OUTPUT_PATH.open("r", encoding="utf-8") as fp:
+        saved_answers = json.load(fp)
+    validate_results(questions, saved_answers)
+    print(
+        f"Wrote {len(answers)} answers to {OUTPUT_PATH} "
+        "and validated format successfully."
+    )
 
 
 # temporary main function that skips validation of file lengths to test api calls and answer generation.
@@ -91,10 +88,10 @@ def main() -> None:
 #def main() -> None:
 #    questions = load_questions(INPUT_PATH)
 #    answers = build_answers(questions)
-#
+
 #    with OUTPUT_PATH.open("w", encoding="utf-8") as fp:
 #        json.dump(answers, fp, ensure_ascii=False, indent=2)
-#
+
 #    print(f"Wrote {len(answers)} answers to {OUTPUT_PATH}")
 
 
